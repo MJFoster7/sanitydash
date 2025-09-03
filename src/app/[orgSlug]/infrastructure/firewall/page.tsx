@@ -1,8 +1,10 @@
 'use client';
 
+// Path: src/app/[orgSlug]/infrastructure/firewall/page.tsx
+
 import { useEffect, useState } from 'react';
-import { getSupabaseBrowser } from '@/lib/supabase-browser';
 import { useParams } from 'next/navigation';
+import { getSupabaseBrowser } from '@/lib/supabase-browser';
 
 type FormState = {
   ip_address: string;
@@ -34,43 +36,47 @@ export default function FirewallPage() {
   const { orgSlug } = useParams() as { orgSlug: string };
   const supabase = getSupabaseBrowser();
 
-  const [clientId, setClientId] = useState<string | null>(null); // UUID we’ll resolve
+  const [orgId, setOrgId] = useState<string | null>(null); // UUID resolved from "organizations"
   const [form, setForm] = useState<FormState>(defaultState);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  // 1) Resolve client UUID from slug
+  // Resolve organization UUID from slug, then load existing firewall record (one-per-org POC)
   useEffect(() => {
     let cancelled = false;
+
     (async () => {
-      const { data, error } = await supabase
-        .from('clients')
+      // 1) Lookup organization UUID by slug
+      const { data: org, error: orgErr } = await supabase
+        .from('organizations')
         .select('id')
-        .eq('slug', orgSlug)
+        .eq('slug', orgSlug) // If your URL uses the UUID, change to .eq('id', orgSlug)
         .maybeSingle();
 
       if (cancelled) return;
 
-      if (error) {
-        setMessage(`Client lookup error: ${error.message}`);
+      if (orgErr) {
+        setMessage(`Organization lookup error: ${orgErr.message}`);
         setLoading(false);
         return;
       }
-      if (!data?.id) {
-        setMessage('Client not found for this slug.');
+      if (!org?.id) {
+        setMessage('Organization not found for this slug.');
         setLoading(false);
         return;
       }
 
-      setClientId(data.id);
+      setOrgId(org.id);
 
-      // 2) Load existing firewall record (one-per-client POC)
+      // 2) Load existing firewall row (unique on client_id/org_id for POC)
       const { data: fw, error: fwErr } = await supabase
         .from('firewalls')
         .select('*')
-        .eq('client_id', data.id)
+        .eq('client_id', org.id)
         .maybeSingle();
+
+      if (cancelled) return;
 
       if (fwErr && fwErr.code !== 'PGRST116') {
         setMessage(`Load error: ${fwErr.message}`);
@@ -88,20 +94,29 @@ export default function FirewallPage() {
           weight: fw.weight ?? 5,
         });
       }
+
       setLoading(false);
     })();
-    return () => { cancelled = true; };
+
+    return () => {
+      cancelled = true;
+    };
   }, [orgSlug, supabase]);
 
   async function onSave() {
-    if (!clientId) return;
+    if (!orgId) return;
     setSaving(true);
     setMessage(null);
 
-    const payload = { client_id: clientId, ...form, weight: Number(form.weight) };
+    const payload = {
+      client_id: orgId, // using client_id as "organization_id" for POC
+      ...form,
+      weight: Number(form.weight),
+    };
+
     const { error } = await supabase
       .from('firewalls')
-      .upsert(payload, { onConflict: 'client_id' });
+      .upsert(payload, { onConflict: 'client_id' }); // requires unique index on firewalls(client_id)
 
     setSaving(false);
     setMessage(error ? `Save error: ${error.message}` : 'Saved ✓');
@@ -115,23 +130,54 @@ export default function FirewallPage() {
       <section>
         <h2 style={{ marginBottom: 12 }}>Firewall</h2>
         <div style={{ display: 'grid', gap: 12, maxWidth: 640 }}>
-          <label><div>IP Address</div>
-            <input value={form.ip_address} onChange={e => setForm({ ...form, ip_address: e.target.value })} style={{ width: '100%', padding: 8 }} />
+          <label>
+            <div>IP Address</div>
+            <input
+              value={form.ip_address}
+              onChange={e => setForm({ ...form, ip_address: e.target.value })}
+              style={{ width: '100%', padding: 8 }}
+            />
           </label>
-          <label><div>Firmware Version</div>
-            <input value={form.firmware_version} onChange={e => setForm({ ...form, firmware_version: e.target.value })} style={{ width: '100%', padding: 8 }} />
+          <label>
+            <div>Firmware Version</div>
+            <input
+              value={form.firmware_version}
+              onChange={e => setForm({ ...form, firmware_version: e.target.value })}
+              style={{ width: '100%', padding: 8 }}
+            />
           </label>
-          <label><div>Make</div>
-            <input value={form.make} onChange={e => setForm({ ...form, make: e.target.value })} style={{ width: '100%', padding: 8 }} />
+          <label>
+            <div>Make</div>
+            <input
+              value={form.make}
+              onChange={e => setForm({ ...form, make: e.target.value })}
+              style={{ width: '100%', padding: 8 }}
+            />
           </label>
-          <label><div>Model</div>
-            <input value={form.model} onChange={e => setForm({ ...form, model: e.target.value })} style={{ width: '100%', padding: 8 }} />
+          <label>
+            <div>Model</div>
+            <input
+              value={form.model}
+              onChange={e => setForm({ ...form, model: e.target.value })}
+              style={{ width: '100%', padding: 8 }}
+            />
           </label>
-          <label><div>Notes</div>
-            <textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} rows={4} style={{ width: '100%', padding: 8 }} />
+          <label>
+            <div>Notes</div>
+            <textarea
+              value={form.notes}
+              onChange={e => setForm({ ...form, notes: e.target.value })}
+              rows={4}
+              style={{ width: '100%', padding: 8 }}
+            />
           </label>
         </div>
-        <button onClick={onSave} disabled={saving || !clientId} style={{ marginTop: 16, padding: '10px 16px' }}>
+
+        <button
+          onClick={onSave}
+          disabled={saving || !orgId}
+          style={{ marginTop: 16, padding: '10px 16px' }}
+        >
           {saving ? 'Saving…' : 'Save'}
         </button>
         {message && <div style={{ marginTop: 8 }}>{message}</div>}
@@ -149,18 +195,46 @@ export default function FirewallPage() {
               <button type="button" onClick={() => setForm({ ...form, sanity_icon: 'critical' })} aria-pressed={form.sanity_icon === 'critical'}>💣</button>
             </div>
           </label>
-          <label><div>Status</div>
-            <input value={form.status} onChange={e => setForm({ ...form, status: e.target.value })} style={{ width: '100%', padding: 8 }} />
+
+          <label>
+            <div>Status</div>
+            <input
+              value={form.status}
+              onChange={e => setForm({ ...form, status: e.target.value })}
+              style={{ width: '100%', padding: 8 }}
+            />
           </label>
-          <label><div>Risk</div>
-            <textarea value={form.risk} onChange={e => setForm({ ...form, risk: e.target.value })} rows={3} style={{ width: '100%', padding: 8 }} />
+
+          <label>
+            <div>Risk</div>
+            <textarea
+              value={form.risk}
+              onChange={e => setForm({ ...form, risk: e.target.value })}
+              rows={3}
+              style={{ width: '100%', padding: 8 }}
+            />
           </label>
-          <label><div>Solution</div>
-            <textarea value={form.solution} onChange={e => setForm({ ...form, solution: e.target.value })} rows={3} style={{ width: '100%', padding: 8 }} />
+
+          <label>
+            <div>Solution</div>
+            <textarea
+              value={form.solution}
+              onChange={e => setForm({ ...form, solution: e.target.value })}
+              rows={3}
+              style={{ width: '100%', padding: 8 }}
+            />
           </label>
-          <label><div>Weight (1–10)</div>
-            <select value={form.weight} onChange={e => setForm({ ...form, weight: Number(e.target.value) })} style={{ width: '100%', padding: 8 }}>
-              {Array.from({ length: 10 }, (_, i) => i + 1).map(n => <option key={n} value={n}>{n}</option>)}
+
+          <label>
+            <div>Weight (1–10)</div>
+            <select
+              value={form.weight}
+              onChange={e => setForm({ ...form, weight: Number(e.target.value) })}
+              style={{ width: '100%', padding: 8 }}
+            >
+              {Array.from({ length: 10 }, (_, i) => i + 1).map(n => (
+                <option key={n} value={n}>{n}</option>
+              ))}
             </select>
           </label>
         </div>
