@@ -36,44 +36,44 @@ export default function SwitchesPage() {
   const { orgSlug } = useParams() as { orgSlug: string };
   const supabase = getSupabaseBrowser();
 
-  const [clientId, setClientId] = useState<string | null>(null); // UUID resolved from slug
+  const [orgId, setOrgId] = useState<string | null>(null); // UUID resolved from "organizations"
   const [form, setForm] = useState<FormState>(defaultState);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  // 1) Resolve client UUID from slug, then load existing "switches" record (one-per-client POC)
+  // Resolve organization UUID from slug, then load existing switches record (one-per-org POC)
   useEffect(() => {
     let cancelled = false;
 
     (async () => {
-      // Lookup client UUID
+      // 1) Lookup organization UUID by slug
       const { data: org, error: orgErr } = await supabase
-      .from('organizations')
-      .select('id')
-      .eq('slug', orgSlug)   // make sure your "organizations" table has a column called "slug"
-      .maybeSingle();
+        .from('organizations')
+        .select('id')
+        .eq('slug', orgSlug) // If your URL uses the UUID, change to .eq('id', orgSlug)
+        .maybeSingle();
 
       if (cancelled) return;
 
-      if (clientErr) {
-        setMessage(`Client lookup error: ${clientErr.message}`);
+      if (orgErr) {
+        setMessage(`Organization lookup error: ${orgErr.message}`);
         setLoading(false);
         return;
       }
-      if (!client?.id) {
-        setMessage('Client not found for this slug.');
+      if (!org?.id) {
+        setMessage('Organization not found for this slug.');
         setLoading(false);
         return;
       }
 
-      setClientId(client.id);
+      setOrgId(org.id);
 
-      // Load existing switches row (unique on client_id for POC)
+      // 2) Load existing switches row (unique on client_id/org_id for POC)
       const { data: sw, error: swErr } = await supabase
         .from('switches')
         .select('*')
-        .eq('client_id', client.id)
+        .eq('client_id', org.id)
         .maybeSingle();
 
       if (cancelled) return;
@@ -104,19 +104,19 @@ export default function SwitchesPage() {
   }, [orgSlug, supabase]);
 
   async function onSave() {
-    if (!clientId) return;
+    if (!orgId) return;
     setSaving(true);
     setMessage(null);
 
     const payload = {
-      client_id: clientId,
+      client_id: orgId, // using client_id as "organization_id" for POC
       ...form,
       weight: Number(form.weight),
     };
 
     const { error } = await supabase
       .from('switches')
-      .upsert(payload, { onConflict: 'client_id' }); // requires a unique index on switches(client_id)
+      .upsert(payload, { onConflict: 'client_id' }); // requires unique index on switches(client_id)
 
     setSaving(false);
     setMessage(error ? `Save error: ${error.message}` : 'Saved ✓');
@@ -175,7 +175,7 @@ export default function SwitchesPage() {
 
         <button
           onClick={onSave}
-          disabled={saving || !clientId}
+          disabled={saving || !orgId}
           style={{ marginTop: 16, padding: '10px 16px' }}
         >
           {saving ? 'Saving…' : 'Save'}
@@ -190,27 +190,9 @@ export default function SwitchesPage() {
           <label>
             <div>Icon</div>
             <div style={{ display: 'flex', gap: 8 }}>
-              <button
-                type="button"
-                onClick={() => setForm({ ...form, sanity_icon: 'good' })}
-                aria-pressed={form.sanity_icon === 'good'}
-              >
-                ✅
-              </button>
-              <button
-                type="button"
-                onClick={() => setForm({ ...form, sanity_icon: 'warning' })}
-                aria-pressed={form.sanity_icon === 'warning'}
-              >
-                ⚠️
-              </button>
-              <button
-                type="button"
-                onClick={() => setForm({ ...form, sanity_icon: 'critical' })}
-                aria-pressed={form.sanity_icon === 'critical'}
-              >
-                💣
-              </button>
+              <button type="button" onClick={() => setForm({ ...form, sanity_icon: 'good' })} aria-pressed={form.sanity_icon === 'good'}>✅</button>
+              <button type="button" onClick={() => setForm({ ...form, sanity_icon: 'warning' })} aria-pressed={form.sanity_icon === 'warning'}>⚠️</button>
+              <button type="button" onClick={() => setForm({ ...form, sanity_icon: 'critical' })} aria-pressed={form.sanity_icon === 'critical'}>💣</button>
             </div>
           </label>
 
