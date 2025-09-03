@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { ReactNode } from 'react';
+import InfraScore from './InfraScore'; // <-- add this
 
 export default function OrgLayout({
   children,
@@ -17,7 +18,10 @@ export default function OrgLayout({
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '260px 1fr', minHeight: '100vh' }}>
       <aside style={{ borderRight: '1px solid #eee', padding: 16, position: 'sticky', top: 0, height: '100vh' }}>
-        <div style={{ fontSize: 12, fontWeight: 700, color: '#666', marginBottom: 8 }}>Infrastructure</div>
+        <div style={{ display:'flex', alignItems:'baseline', gap:8, marginBottom: 8 }}>
+          <div style={{ fontSize: 12, fontWeight: 700, color: '#666' }}>Infrastructure</div>
+          <InfraScore orgSlug={orgSlug} />
+        </div>
         <nav style={{ display: 'grid', gap: 8 }}>
           {nav.map(item => (
             <Link key={item.href} href={item.href} style={{ textDecoration: 'none', color: '#111' }}>
