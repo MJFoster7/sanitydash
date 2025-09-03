@@ -48,11 +48,11 @@ export default function SwitchesPage() {
 
     (async () => {
       // Lookup client UUID
-      const { data: client, error: clientErr } = await supabase
-        .from('clients')
-        .select('id')
-        .eq('slug', orgSlug) // If your param is actually the UUID, change to .eq('id', orgSlug)
-        .maybeSingle();
+      const { data: org, error: orgErr } = await supabase
+      .from('organizations')
+      .select('id')
+      .eq('slug', orgSlug)   // make sure your "organizations" table has a column called "slug"
+      .maybeSingle();
 
       if (cancelled) return;
 
