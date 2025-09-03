@@ -1,21 +1,18 @@
 'use client';
 
 // Path: src/app/[orgSlug]/report/page.tsx
-// Renders a printable report for the organization under [orgSlug].
-// Use the browser's "Save as PDF" via the Print button.
+// Printable Infrastructure report (browser print -> Save as PDF)
 
 import { useEffect, useMemo, useState } from 'react';
 import { useParams } from 'next/navigation';
 import { getSupabaseBrowser } from '@/lib/supabase-browser';
-
-type SanityLevel = 'good' | 'warning' | 'critical';
+import { infraPercent, SanityLevel } from '@/lib/scoring';
 
 const ICONS: Record<SanityLevel, string> = {
   good: '✅',
   warning: '⚠️',
   critical: '💣',
 };
-
 const LABELS: Record<SanityLevel, string> = {
   good: 'Good',
   warning: 'Warning',
@@ -27,11 +24,7 @@ type SanityBlock = {
   status: string | null;
   risk: string | null;
   solution: string | null;
-};
-
-type InfraRow = {
-  name: 'Switches' | 'Firewall';
-  data: SanityBlock | null;
+  weight: number | null;
 };
 
 export default function ReportPage() {
@@ -47,11 +40,11 @@ export default function ReportPage() {
   useEffect(() => {
     let cancelled = false;
     (async () => {
-      // 1) Resolve organization
+      // 1) Resolve organization by slug (or swap to .eq('id', orgSlug) if your URL is the UUID)
       const { data: org, error: orgErr } = await supabase
         .from('organizations')
         .select('id, name, slug')
-        .eq('slug', orgSlug) // if URL uses UUID, change to .eq('id', orgSlug)
+        .eq('slug', orgSlug)
         .maybeSingle();
 
       if (cancelled) return;
@@ -64,51 +57,82 @@ export default function ReportPage() {
       setOrgId(org.id);
       setOrgName(org.name ?? org.slug ?? '');
 
-      // 2) Fetch infra sanity for Firewall and Switches
+      // 2) Fetch sanity blocks (include weight for scoring)
       const [{ data: fw }, { data: sw }] = await Promise.all([
         supabase
           .from('firewalls')
-          .select('sanity_icon, status, risk, solution')
+          .select('sanity_icon, status, risk, solution, weight')
           .eq('client_id', org.id)
           .maybeSingle(),
         supabase
           .from('switches')
-          .select('sanity_icon, status, risk, solution')
+          .select('sanity_icon, status, risk, solution, weight')
           .eq('client_id', org.id)
           .maybeSingle(),
       ]);
 
-      setFirewall(fw ?? null);
-      setSwitches(sw ?? null);
+      setFirewall(
+        fw
+          ? {
+              sanity_icon: (fw.sanity_icon ?? null) as SanityLevel | null,
+              status: fw.status ?? null,
+              risk: fw.risk ?? null,
+              solution: fw.solution ?? null,
+              weight: fw.weight ?? null,
+            }
+          : null
+      );
+      setSwitches(
+        sw
+          ? {
+              sanity_icon: (sw.sanity_icon ?? null) as SanityLevel | null,
+              status: sw.status ?? null,
+              risk: sw.risk ?? null,
+              solution: sw.solution ?? null,
+              weight: sw.weight ?? null,
+            }
+          : null
+      );
+
       setLoading(false);
     })();
+
     return () => {
       cancelled = true;
     };
   }, [orgSlug, supabase]);
 
-  const rows: InfraRow[] = useMemo(
-    () => [
-      { name: 'Switches', data: switches },
-      { name: 'Firewall', data: firewall },
-    ],
-    [firewall, switches]
-  );
-
-  if (loading) return <div>Loading…</div>;
+  const infraPct = useMemo(() => {
+    return infraPercent(
+      firewall ? { sanity_icon: firewall.sanity_icon, weight: firewall.weight } : null,
+      switches ? { sanity_icon: switches.sanity_icon, weight: switches.weight } : null
+    );
+  }, [firewall, switches]);
 
   function onPrint() {
     window.print();
   }
 
+  if (loading) return <div>Loading…</div>;
+
+  const rows: Array<{ name: 'Switches' | 'Firewall'; data: SanityBlock | null }> = [
+    { name: 'Switches', data: switches },
+    { name: 'Firewall', data: firewall },
+  ];
+
   return (
     <div style={{ padding: 24 }}>
-      {/* Toolbar (hidden in PDF) */}
-      <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}>
+      {/* Toolbar (hidden when printing) */}
+      <div
+        className="no-print"
+        style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 }}
+      >
         <div>
           <a href={`/${orgSlug}`}>&larr; Back</a>
         </div>
-        <button onClick={onPrint} style={{ padding: '10px 16px' }}>Print / Save as PDF</button>
+        <button onClick={onPrint} style={{ padding: '10px 16px' }}>
+          Print / Save as PDF
+        </button>
       </div>
 
       {/* Header */}
@@ -119,15 +143,20 @@ export default function ReportPage() {
         </div>
       </header>
 
-      {/* Title */}
-      <h2 style={{ marginTop: 24, marginBottom: 12 }}>INFRASTRUCTURE</h2>
+      {/* Section title with % */}
+      <h2 style={{ marginTop: 24, marginBottom: 12 }}>
+        INFRASTRUCTURE {infraPct === null ? '' : `— ${infraPct}%`}
+      </h2>
 
       {/* Table */}
       <table style={{ width: '100%', borderCollapse: 'collapse' }}>
         <thead>
           <tr>
             {['', 'Icon', 'Risk', 'Status', 'Solution'].map((h) => (
-              <th key={h} style={{ borderBottom: '2px solid #000', textAlign: 'left', padding: '8px 6px' }}>
+              <th
+                key={h}
+                style={{ borderBottom: '2px solid #000', textAlign: 'left', padding: '8px 6px' }}
+              >
                 {h}
               </th>
             ))}
@@ -142,11 +171,23 @@ export default function ReportPage() {
             const solution = row.data?.solution || '—';
             return (
               <tr key={row.name}>
-                <td style={{ borderBottom: '1px solid #ddd', padding: '8px 6px', fontWeight: 600 }}>{row.name}</td>
+                <td
+                  style={{ borderBottom: '1px solid #ddd', padding: '8px 6px', fontWeight: 600 }}
+                >
+                  {row.name}
+                </td>
                 <td style={{ borderBottom: '1px solid #ddd', padding: '8px 6px' }}>{iconText}</td>
-                <td style={{ borderBottom: '1px solid #ddd', padding: '8px 6px', whiteSpace: 'pre-wrap' }}>{risk}</td>
+                <td
+                  style={{ borderBottom: '1px solid #ddd', padding: '8px 6px', whiteSpace: 'pre-wrap' }}
+                >
+                  {risk}
+                </td>
                 <td style={{ borderBottom: '1px solid #ddd', padding: '8px 6px' }}>{status}</td>
-                <td style={{ borderBottom: '1px solid #ddd', padding: '8px 6px', whiteSpace: 'pre-wrap' }}>{solution}</td>
+                <td
+                  style={{ borderBottom: '1px solid #ddd', padding: '8px 6px', whiteSpace: 'pre-wrap' }}
+                >
+                  {solution}
+                </td>
               </tr>
             );
           })}
