@@ -1,7 +1,7 @@
 'use client';
 
 import { useEffect, useState } from 'react';
-import { getSupabaseBrowser } from '@/src/lib/supabase-browser';
+import { getSupabaseBrowser } from '@/lib/supabase-browser';
 import { useParams } from 'next/navigation';
 
 type FormState = {
